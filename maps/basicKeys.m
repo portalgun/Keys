@@ -1,5 +1,5 @@
 function keys=basicKeys()
-if islinux
+if Sys.islinux
     keys.q=113;
     keys.w=119;
     keys.e=101;

@@ -29,7 +29,7 @@ if ispc
     K.colon     = KbName(';');
     K.backslash = KbName('\\');
     K.slash = KbName('/?');
-elseif islinux
+elseif Sys.islinux
     K.backspace = KbName('BackSpace');
     K.delete    = KbName('Delete');
     K.colon     = KbName(';:');

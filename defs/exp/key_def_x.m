@@ -1,6 +1,6 @@
-classdef key_defs_x < handle & key_def
+classdef KeyDefs_x < handle & KeyDef
 methods
-    function obj=key_defs_x();
+    function obj=KeyDefs_x();
         obj@key_set();
 
         obj.n('\R')  = 'choose_right';

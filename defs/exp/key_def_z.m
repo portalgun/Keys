@@ -1,6 +1,6 @@
-classdef key_def_z < handle & key_def
+classdef KeyDef_z < handle & KeyDef
 methods
-    function obj=key_defs_z();
+    function obj=KeyDefs_z();
         obj@key_set();
         obj.n('\U')  = 'choose_greater'
         obj.n('\D')  = 'choose_closer'

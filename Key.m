@@ -1,189 +1,340 @@
 classdef Key < handle %& trlInt
 properties
-    mode
-    CAPTURE
-    STR
-
-    def
-    defName
+    bPTB
 
     key
+    literal
+    keyTime
+    lastKeyTime
     cmd
-    package
-    OUT
+    name
+    status
 
-    PAR
+    ScanGrabber
+    KeyConverter
+    KeyStr
+    KeyDef
 
-    eParamCanChange
-    eMessageGenerated
-
-
+    lastMode
+    lastDef
 end
 properties(Hidden=true)
-    bPtb
-    bStatus
-    bMeta=0
-    bPsycho=0
-end
-events
-    newKeyset % trlInt
-    newMode  % trlInt
-    % WITH META
-    ParamNeedChange
-    ParamNeedRun
+    scanBinds
+    scanInds
 end
 methods
-    function obj=Key(PARorOpts)
-        if ~exist('PARorOpts','var')
-            PAR=[];
-            Opts=[];
-        elseif isa(PARorOpts,'psycho')
-            PAR=PARorOpts;
-            Opts=PAR.OPTS; % XXX
-            obj.PAR=pointer(PAR);
-            obj.bPsycho=1;
-        else
-            PAR=[];
-            Opts=PARorOpts;
+    function obj=Key(varargin)
+        Opts=obj.parse(varargin{:});
+        obj.KeyConverter=KeyConverter(Opts.modList,Opts.KeyCoderName,obj.bPTB);
+        if isempty(Opts.repWhiteListInd)
+            Opts.repWhiteListInd=obj.getDefaultRepWhiteListInd(Opts.nKeys);
         end
-        Opts=obj.parse_Opts(Opts);
-
-        obj.CAPTURE= key_capture(Opts.keyDefRead, Opts.bUseKeyCaps, Opts.pauseLength);
-
-        obj.STR=key_str(Opts.initialStrMode,Opts.initialStr,Opts.initialPos);
-
-        obj.change_keyset(Opts.keyDefName);
-        obj.change_mode(Opts.initialMode);
-        obj.mode=Opts.initialMode;
-
-
-        if ~isempty(PAR) && isprop(PAR,'META') && ~isa(PAR.META,'meta_param')
-            obj.bMeta=1;
-            obj.eParamCanChange=addlistener(PAR.META,'ParamCanChange',@(src,data) get_package(obj,src,data));
-            obj.eMessageGenerated=addlistener(PAR.META,'MessageGenerated',@(src,data)    read_message(obj,src,data));
-
-        end
-
+        obj.KeyDef=KeyDef.change([],Opts.keyDefName,Opts.initialMode);
+        obj.KeyStr=KeyStr(Opts.initialStrMode,Opts.initialStr,Opts.initialPos);
+        obj.ScanGrabber= ScanGrabber('nKeys',Opts.nKeys,...
+                                     'holdCrit',Opts.holdCrit, ...
+                                     'repCrit',Opts.repCrit, ...
+                                     'blackListInd',Opts.blackListInd, ...
+                                     'repWhiteListInd',Opts.repWhiteListInd ...
+                                    );
     end
-    function Opts=parse_Opts(obj,Opts)
-        names={...
-                  'keyDefName'  ,'basic'    ,'ischar_e';...
-                  'bUseKeyCaps' ,1  ,'isnumeric';...
-                  'pauseLength' ,0.2,'isnumeric';...
-                  'initialStrMode' ,'str','ischar';...
-                  'initialStr' ,'','ischar';...
-                  'initialPos' ,1,'isint';...
-                  'initialMode','n','ischar';...
-                  'bPtb',1,'isbinary';...
-              };
-        Opts=parse([],Opts,names);
-        Opts.keyDefRead='ptb';
-        %if Opts.ptb
-        %    Opts.keyDefRead='ptb';
-        %else
-        %    Opts.keyDefRead='basic';
+    function Opts=parse(obj,varargin)
+        if numel(varargin) == 1 && (isstruct(varargin{1}) || isa(varargin{1},'dict'))
+            Opts=varargin{1};
+            Opts=Args.parse(struct(), Key.getP, Opts);
+        else
+            Opts=Args.parse(struct(), Key.getP, varargin{:});
+        end
+        if isempty(which('KbName'))
+            Opts.KeyCoderName='BasicMap';
+            obj.bPTB=false;
+        else
+            Opts.KeyCoderName='PtbMap';
+            obj.bPTB=true;
+        end
+    end
+%%
+    function read_meta(obj,cmd)
+        obj.status='k';
+        switch cmd{1}
+        case 'last_mode'
+            obj.change_def([],obj.KeyDef.defMode);
+        case 'mode'
+            obj.change_def([],cmd{2});
+        case 'def'
+            obj.change_def(cmd{2});
+        case 'any'
+            obj.any();
+        otherwise
+            obj.status='';
+        end
+    end
+    function any(obj)
+        % LEAVE EMPTY
+    end
+    function exitflag=read(obj)
+        if obj.bPTB
+            [exitflag,scanBinds,keyTime]=obj.ScanGrabber.read(); %KeyPressed
+            if exitflag
+                return
+            end
+            %if isempty(obj.scanBinds)
+            %    obj.keyTime=keyTime;
+            %    obj.scanInds=find(scanBinds);
+            %else
+                obj.keyTime(end+1,1)=keyTime;
+                obj.scanBinds=[obj.scanBinds; scanBinds];
+            %end
+        else
+            exitflag=false;
+            waitforbuttonpress;
+            obj.scanInds = double(get(gcf,'CurrentCharacter'));
+        end
+    end
+    function [key,literal,exitflag,msg]=convertInd(obj,scanInds)
+        n=size(scanInds,2);
+        exitflag=false(n,1);
+        literal=cell(n,1);
+        key=cell(n,1);
+        msg={};
+        [exitflag,literal,key]=obj.KeyConverter.read(scanInds);
+        %for i = 1:n
+            %[exitflag,literal,key]=obj.KeyConverter.read(scanInds);
+            %try
+            %    [exitflag(i,1),literal{i,1},key{i,1}]=obj.KeyConverter.read(scanInds(i));
+            %catch ME
+            %    if strcmp(ME.identifier,'MATLAB:Containers:Map:NoKey')
+            %        exitflag(i)=true;
+            %        msg{end+1,1}=['Keycode not defined for scancode ' num2str(scanInds(i))];
+            %    else
+            %        rethrow(ME);
+            %    end
+            %end
+        %end
+        %literal(exitflag)=[];
+        %key(exitflag)=[];
+        %exitflag=all(exitflag) || isempty(literal);
+        %if exitflag
+        %    return
         %end
     end
-    function obj=update(obj,t,i)
-        update@trlInt(obj,t,i);
-        obj.change_keyset(obj.newName);
-        obj.change_mode(obj.newName);
-    end
-    function obj=change_keyset(obj,newName)
-        if ~isempty(newName) && (isempty(obj.def) || ~strcmp(obj.defName, newName))
-            obj.def=key_def.get_def(newName);
-            obj.defName=newName;
+    function [literal,exitflag,msg]=convertBind(obj,scanBinds)
+        m=size(scanBinds,1);
+        exitflag=false(m,1);
+        literal=cell(m,1);
+        key=cell(m,1);
+        for j = 1:m
+            scanInds=find(scanBinds(j,:));
+            [key{j},literal{j},exitflag(j),msg{j}]=obj.convertInd(scanInds);
         end
-    end
-    function obj=change_mode(obj,newMode)
-        if ~isempty(newMode) && ~strcmp(obj.def.mode,newMode)
-            obj.def.update_mode(newMode);
-            obj.mode=newMode;
+        msg=vertcat(msg{:});
+        if all(exitflag)
+            obj.literal={};
+            obj.key={};
+            return
         end
+        obj.literal=literal;
+        obj.key=key;
+
     end
-    function obj=read(obj,varargin)
-        obj.OUT=[];
+    function reset(obj)
+        obj.lastKeyTime=obj.keyTime;
+        obj.keyTime=[];
+        obj.scanInds=[];
+        obj.scanBinds=[];
         obj.key=[];
         obj.cmd=[];
-        % varargin{1} = keyset
-        % varargin{2} = mode
-        if length(varargin) == 1
-            obj.change_keyset(varargin{1});
-        elseif length(varargin) == 2
-            obj.change_keyset(varargin{1});
-            obj.change_mode(varargin{2});
+        obj.status=[];
+    end
+    function [exitflag,CMD,NAME,LITERAL,STATUS,msg]=convert(obj,varargin)
+        if nargin >= 2
+            obj.change_def(varargin{:});
         end
 
-        obj.CAPTURE.read(); %KeyPressed
-        if ~isempty(obj.CAPTURE.OUT)
-            obj.key=obj.CAPTURE.OUT;
-            obj.cmd=obj.def.get(obj.key);
-            % command target value
-        else
+        scanInds=obj.scanInds;
+        scanBinds=obj.scanBinds;
+        obj.reset();
+        CMD=[]; STATUS=[]; NAME=[]; LITERAL=[];
+
+        if ~isempty(scanBinds)
+            obj.convertBind(scanBinds);
+        elseif ~isempty(scanInds)
+            [obj.key,obj.literal,exitflag,msg]=obj.convertInd(scanInds);
+            obj.key={obj.key};
+            obj.literal={obj.literal};
+            if exitflag
+                return
+            end
+        end
+        % LAYER 1, multiple scans
+        % LAYER 2, simultaneous presses
+        [estatus,status,cmd,name,msg,bTrans]= cellfun(@(x) obj.convert_fun(x), obj.literal,'UniformOutput',false);
+        obj.literal=vertcat(obj.literal{:});
+        msg=vertcat(msg{:});
+        estatus=[estatus{:}];
+        rmind=estatus ~= 0;
+        status(rmind)=[];
+        cmd(rmind)=[];
+        name(rmind)=[];
+
+
+        if isempty(cmd)
+            exitflag=true;
             return
         end
-        if isempty(obj.cmd)
+        if bTrans{end}
+            obj.change_def([],obj.KeyDef.defMode);
+        end
+        obj.status=status;
+        obj.cmd=cmd;
+        obj.name=name;
+
+        exitflag=false;
+        CMD=obj.cmd;
+        NAME=obj.name;
+        STATUS=obj.status;
+        LITERAL=obj.literal;
+    end
+    function [estatus,status,cmd,name,msg,bTrans]=convert_fun(obj,literal)
+        estatus=0;
+        status=[];
+        [cmd,name,msg,bTrans]=cellfun(@(x) obj.KeyDef.read(x),literal,'UniformOutput',false);
+
+        if all(cellfun(@isempty,cmd))
+            bTrans=[bTrans{:}];
+            cmd=[cmd{:}];
+            name=[name{:}];
+            estatus=1;
+            return
+        end
+        if ~iscell(cmd{1})
+            [cmd,status]=obj.parse_cmd(cmd);
+            bTrans=[bTrans{:}];
+            cmd=[cmd{:}];
+            name=[name{:}];
+            estatus=2;
             return
         end
 
-        if iscell(obj.cmd{1})
-            tmp=cell(length(obj.cmd),1);
-            for i = 1:length(obj.cmd)
-                obj.parse(obj.cmd{i});
-                tmp{i}=obj.OUT;
+        % EXPAND MULTIPLE COMMANDS FOR SINGLE ARG
+        CMD={};
+        for i = 1:length(cmd)
+            if isempty(cmd{i})
+                continue
+            elseif all(iscell(cmd{i})) && all(cellfun(@iscell,cmd{i}))
+                CMD=[CMD; Vec.col(cmd{i})];
+            else
+                CMD{end+1}=cmd{i};
             end
-            ind=cellfun(@isempty,tmp);
-            tmp(ind)=[];
-            if numel(tmp)==1
-                tmp=tmp{1};
-            end
-            obj.OUT=tmp;
+        end
+        cmd=CMD;
+        [cmd,status]=cellfun(@obj.parse_cmd, cmd,'UniformOutput',false);
+
+        rmind=cellfun(@(x,y) isempty(x) && isempty(y),cmd, status);
+        cmd(rmind)=[];
+        status(rmind)=[];
+        name(rmind)=[];
+
+        bTrans=[bTrans{:}];
+        cmd=vertcat(cmd{:});
+        name=[name{:}];
+        status=vertcat(status{:});
+
+    end
+    function [str,pos,mode,flag, bDiff]=getString(obj)
+        str=obj.KeyStr.str;
+        pos=obj.KeyStr.pos;
+        mode=obj.KeyStr.strMode;
+        flag=obj.KeyStr.flag;
+        bDiff=obj.KeyStr.bDiff;
+        obj.KeyStr.bDiff=false;
+    end
+    function moude=getMode(obj)
+        mode=obj.KeyDef.mode;
+    end
+    function histr=getHistory(obj)
+        histr=obj.KeyStr.history;
+    end
+    function OUT=returnString(obj)
+        OUT=obj.KeyStr.return_str();
+    end
+end
+methods(Access=?PsyShell)
+    function toggle_def(obj,newName)
+        if strcmp(newName,obj.lastDef)
+            obj.change_def(obj.lastDef,[]);
         else
-            obj.parse(obj.cmd);
+            obj.change_def(newName,[]);
         end
     end
-    function obj=parse(obj,cmd)
-        if strcmp(cmd{2},'str')
-            obj.STR.read(cmd);
-            obj.OUT={'set',cmd{2},obj.STR.str,obj.STR.pos,obj.STR.flag};
-            % flag, -2 clear, -1=cancel, 1=return, 0 nothing
-        elseif strcmp(cmd{2},'mode')
-            obj.change_mode(cmd{3});
-            obj.OUT=[];
-        elseif ~isempty(cmd)
-            obj.parse_other(cmd); % speaks with meta for set, psycho for run
-        % STRINGS & MODES
+    function change_def(obj,newName,newMode)
+        obj.lastMode=obj.KeyDef.mode;
+        obj.lastDef=obj.KeyDef.name;
+        obj.KeyDef=KeyDef.change(obj.KeyDef, newName, newMode);
+    end
+end
+methods(Access=private)
+    function [OUT,status]=parse_cmd(obj,cmd)
+        if iscell(cmd{1})
+            [OUT,status]=cellfun(@obj.parse_cmd,cmd,'UniformOutput',false);
+            %OUT=[OUT{:}];
+            return
+        end
+        % flag, -2 clear, -1=cancel, 1=return, 0 nothing
+        cmd=[cmd repmat({''},1,4-length(cmd))];
+        OUT=cmd;
+        switch cmd{1}
+            case 'str'
+                [~,bSuccess]=obj.KeyStr.read(cmd(2:end));
+                if bSuccess
+                    status='s';
+                else
+                    status='';
+                end
+            case 'key'
+                obj.read_meta(cmd(2:end));
+                status='k';
+            case 'go'
+                status='g';
+            case 'ex'
+                status='e';
+            otherwise
+                status='o';
+        end
+        if isempty(status)
+            OUT=[];
         end
     end
-    function obj=parse_other(obj,cmd)
-        obj.bStatus=0;
-
-        if strcmp(cmd{1},'run') || strcmp(cmd{1},'go')
-            obj.bStatus=2;
-            %obj.package=cmd(2:end);
-            notify(obj,'ParamNeedRun'); % TO META -> ParamCanChange -> set_cmd
-            %notify(obj,'ParamNeedRun',cmd); % TO META -> ParamCanChange -> set_cmd
-            obj.OUT=cmd;
-        elseif ismember(cmd{1},{'rotate','rotatedn','rotateup','toggle','inc','incup','incdn','set'})
-            obj.bStatus=1;
-            notify(obj,'ParamNeedChange'); % TO META -> ParamCanChange -> set_cmd
-            obj.OUT=cmd;
-            % atuo runs set cmd if successful
+    function bind=getDefaultRepWhiteListInd(obj,nKeys)
+        bind=false(nKeys,1);
+        if ~obj.bPTB
+            return
         end
+        list={...
+                    'shiftL';
+                    'shiftR';;
+                    'ctlL';
+                    'ctlR';
+                    'altL';
+                    'altR';
+                    'guiL';
+                    'guiR';
+        };
+        inds=obj.KeyConverter.keyCodeToScanCode(list);
+        bind(inds)=true;
     end
-    function obj=get_package(obj,~,package)
-        obj.package=package;
-        obj.bStatus=1;
+end
+methods(Static,Hidden)
+    function P=getP()
+        PScn=ScanGrabber.getP();
+        PStr=KeyStr.getP();
+        P={ ...
+            'keyDefName'  ,'basic','ischar_e';... % KEY DEF
+            'initialMode','n','ischar';...            % KEY DEF
+            'bConvert',true,'isBinary';...
+            'modList',[],'iscell_e';...
+        };
+        P=[PStr; PScn; P];
     end
-    %function obj=read_message(obj,~,message)
-    %    % codes
-    %    %1 = locked
-    %    %2 = unhandled command
-    %    code=message{1};
-    %    text=message{2};
-    %    % TODO
-    %end
-
-
 end
 end

@@ -1,6 +1,6 @@
-classdef key_def_base < handle & key_def
+classdef KeyDef_base < handle & KeyDef
 methods
-    function obj=key_def_base()
+    function obj=KeyDef_base()
         obj@key_set();
 
         obj.n('?')   = 'help_menu'; %return

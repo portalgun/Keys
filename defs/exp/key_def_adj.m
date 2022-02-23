@@ -1,6 +1,6 @@
-classdef key_def_adj < handle & key_def
+classdef KeyDef_adj < handle & KeyDef
 methods
-     function obj=key_def_adj();
+     function obj=KeyDef_adj();
           obj@key_set();
 
           obj.n('\U')  = 'up_map';

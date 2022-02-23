@@ -1,6 +1,6 @@
-classdef key_def_template < handle & key_def
+classdef KeyDef_template < handle & KeyDef
 methods
-    function obj=key_def_template();
+    function obj=KeyDef_template();
         obj@key_set();
 
         obj.n('\n')  =''

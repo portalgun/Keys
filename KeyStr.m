@@ -1,16 +1,17 @@
-classdef key_str < handle
+classdef KeyStr < handle
 properties
-    pos=1;
 
     histpos=1;
     histtmp;
     history
 
-    strMode
+    strMode='str'
     set %valid or not specified by strMOde
 
+    pos=1;
     str
     OUT
+    bDiff
 
     count
     lastcount
@@ -21,8 +22,11 @@ properties
     % 0 nothing
     % 1 return
 end
+properties(Constant)
+    modes={'str','numext','intpos','int','alpha','numreal'};
+end
 methods
-    function obj=key_str(initialMode,initialStr,initialPos)
+    function obj=KeyStr(initialMode,initialStr,initialPos)
         obj.history=struct('str',cell(1,1), ...
                            'numext',cell(1,1), ...
                            'intpos',cell(1,1), ...
@@ -33,16 +37,13 @@ methods
         for i = 1:length(flds)
             fld=flds{i};
             obj.history.(fld)=cell(1,1);
-            obj.history.(fld){1}= ' ';
+            obj.history.(fld){1}=' ';
         end
-        modes={'str','numext','intpos','int','alpha','numreal'};
-        if exist('initialMode','var') && ~isempty(initialMode) && ismember(initialMode,modes)
-            obj.strMode=initialMode;
-        elseif exist('initialMode','var') && ~isempty(initialMode) && ~ismember(initialMode,modes)
-            error(['Invalid Mode: ' initialMode ])
-        else
-            obj.strMode='str';
+
+        if ~exist('initialMode','var') || isempty(initialMode)
+            initialMode=obj.strMode;
         end
+        obj.change_mode(initialMode);
 
         if exist('initialStr','var') && ~isempty(initialStr) && ischar(initialStr)
             obj.str=initialStr;
@@ -52,52 +53,61 @@ methods
         if ~isempty(obj.str) &&  exist('initialPose','var') && ~isempty(initialPos) && isint(initialPos)
             obj.pos=initialPos;
         elseif ~isempty(obj.str) &&  exist('initialPose','var') && ~isempty(initialPos) && ~isint(initialPos)
-            error('Invalid initial position specified')
+            error('Invalid initial position specified');
         elseif ~isempty(obj.str)
             obj.pos=length(obj.str);
         end
 
     end
-    function obj=read(obj,command)
+    function [cmd,bSuccess,flag,bDiff]=read(obj,command)
         obj.flag=0;
-        if ~strcmp(command{2},'str')
-            return
-        end
-        if length(command) > 3
-            val=command{4};
+        bSuccess=true;
+        if length(command) > 1
+            val=command(2:end);
         elseif ~isempty(obj.count) && ischar(obj.count)
             obj.return_count;
-            val=obj.count;
+            val={obj.count};
         else
-            val=[];
+            val={};
         end
-        if ismethod('key_str',command{3})
-            obj=obj.(command{3})(val);
+        if ismethod('KeyStr',command{1})
+            lastStr=obj.str;
+            lastPos=obj.pos;
+            obj.(command{1})(val{:});
+            obj.bDiff = ~strcmp(lastStr,obj.str) || ~isequal(lastPos,obj.pos);
+            cmd=command{1};
+        else
+            bDiff=0;
+            bSuccess=false;
+            cmd={};
         end
+        flag=obj.flag;
     end
-    function obj=change_mode(obj,strMode)
-        obj.strMode=strMode; % ADD TO PARENT
-        switch obj.strMode
+    function change_mode(obj,strMode)
+        switch strMode
             case 'str'
-                obj.set=strV();
+                obj.set=Str.AlphNum.A();
             case 'numext'
-                obj.set=numVext();
+                obj.set=Str.Num.matSet();
             case 'intpos'
-                obj.set=numV();
+                obj.set=Numstr.intSet();
             case 'int'
-                obj.set=numVneg();
+                obj.set=Str.Num.negSet();
             case 'alpha'
-                obj.set=alphaV();
+                obj.set=Str.Alph.set();
             case 'numreal'
-                obj.set=numVR();
+                obj.set=Str.Alph.realSet();
+            otherwise
+                error(['Invalid Mode: ' strMode ]);
         end
+        obj.strMode=strMode; % ADD TO PARENT
     end
 %% CAPS CHANGE
     function obj=up_case(obj,~)
-        obj.str = makeUpperCase(obj.str);
+        obj.str = Str.Alph.Upper(obj.str);
     end
     function obj=down_case(obj,~)
-        obj.str = makeLowerCase(obj.str);
+        obj.str = Str.Alph.Lower(obj.str);
     end
     function obj=change_pos(obj,newpos)
         if isnan(newpos)
@@ -133,7 +143,9 @@ methods
         end
         e=obj.str(obj.pos:end);
         obj.str=[s newChar e];
-        obj.pos=obj.pos+1;
+        if ~isempty(newChar)
+            obj.pos=obj.pos+1;
+        end
     end
     function obj=insert_forward_char(obj,newChar)
         s=obj.str(1:obj.pos);
@@ -181,28 +193,31 @@ methods
         end
     end
 %% special keys
-    function obj=clear_str(obj,~)
+    function clear_str(obj)
         obj.str='';
         obj.pos=1;
         obj.flag=-2;
     end
-    function obj=cancel_str(obj,~)
+    function cancel_str(obj)
         obj.str='';
         obj.pos=1;
         obj.flag=-1;
     end
-    function obj=return_str(obj,~)
+    function out=return_str(obj)
         obj.OUT=obj.str;
+        obj.append_history();
         obj.str=[];
         obj.pos=1;
-        obj.append_history();
         obj.histpos=obj.histpos+1;
         obj.flag=1;
+        if nargout > 0
+            out=obj.OUT;
+        end
     end
-    function obj=append_history(obj,~)
-        obj.history.(obj.strMode){end+1,1}=obj.str;
+    function append_history(obj)
+        obj.history.(obj.strMode)=[obj.str; obj.history.(obj.strMode)];
     end
-    function obj=inc_pos_left(obj,n)
+    function inc_pos_left(obj,n)
         if ~exist('n','var') || isempty(n)
             n=1;
         end
@@ -219,35 +234,36 @@ methods
         end
     end
     function obj=up_history(obj,n)
-        % down in history
         if ~exist('n','var') || isempty(n)
             n=1;
         end
         for i = 1:n
-            if obj.histpos==1
+            if obj.histpos==1 % AT TOP
                 return
-            elseif obj.histpos > obj.history(obj.strMode)
+            % svae non-returned text
+            elseif obj.histpos == length(obj.history.(obj.strMode))
                 obj.histtmp=obj.str;
             end
             obj.histpos=obj.histpos-1;
-            obj.str=obj.history.(obj.strMode)(obj.histpos);
+            obj.str=obj.history.(obj.strMode){obj.histpos};
             obj.change_pos(obj.pos);
         end
     end
     function obj=down_history(obj,n)
-        %
         if ~exist('n','var') || isempty(n)
             n=1;
         end
         for i = 1:n
-            if obj.histpos==length(obj.history.(obj.strMode))+1
+            if obj.histpos+1>length(obj.history.(obj.strMode))
+                obj.histpos=length(obj.history.(obj.strMode));
                 return
-            elseif obj.histpos==length(obj.history.(obj.strMode))
+            % Rrestore non-returned text
+            elseif obj.histpos==length(obj.history.(obj.strMode))-1
                 obj.histpos=obj.histpos+1;
                 obj.str=obj.histtmp;
             else
                 obj.histpos=obj.histpos+1;
-                obj.str=obj.history.(obj.strMode)(obj.histpos);
+                obj.str=obj.history.(obj.strMode){obj.histpos};
             end
             obj.change_pos(obj.pos);
         end
@@ -268,6 +284,16 @@ methods
     end
     function obj=repeat_count(obj)
         obj.count=obj.lastcount;
+    end
+end
+methods(Static,Hidden)
+    function P=getP()
+        P={...
+            'initialStr' ,'','ischar';...
+            'initialPos' ,1,'Num.isInt';...
+            'initialStrMode' ,'str','ischar';...
+            'initialMode','n','ischar';...
+          };
     end
 end
 end
