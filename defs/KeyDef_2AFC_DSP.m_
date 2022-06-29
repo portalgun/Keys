@@ -1,0 +1,7 @@
+classdef KeyDef_2AFC_DSP < KeyDef
+properties(Constant)
+    EXDEPS= {'cmd','go','view_limited','2AFC'}
+    KEYDEPS={'cmd','go','view_limited','2AFC_DSP'};
+    DEFMODE='limi'
+end
+end

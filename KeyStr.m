@@ -1,3 +1,4 @@
+
 classdef KeyStr < handle
 properties
 
@@ -8,25 +9,34 @@ properties
     strMode='str'
     set %valid or not specified by strMOde
 
+    width=inf % width of text box
     pos=1;
     str
+    strBoxed  % str as viewed in box
+    posBox=1;
+    lastBoxPos
+    boxShift=0
     OUT
     bDiff
+    preTxt
+    postTxt
 
     count
     lastcount
     flag=0
 
+    initialStr
     % -2 clear
     % -1 cancel
     % 0 nothing
     % 1 return
+    keystrmethods
 end
 properties(Constant)
     modes={'str','numext','intpos','int','alpha','numreal'};
 end
 methods
-    function obj=KeyStr(initialMode,initialStr,initialPos)
+    function obj=KeyStr(initialMode,initialStr,initialPos,width,preTxt,postTxt)
         obj.history=struct('str',cell(1,1), ...
                            'numext',cell(1,1), ...
                            'intpos',cell(1,1), ...
@@ -47,19 +57,41 @@ methods
 
         if exist('initialStr','var') && ~isempty(initialStr) && ischar(initialStr)
             obj.str=initialStr;
+            obj.initialStr=initialStr;
         elseif exist('initialStr','var') && ~isempty(initialStr) && ~ischar(initialStr)
             error('invalid initialstr specified');
         end
-        if ~isempty(obj.str) &&  exist('initialPose','var') && ~isempty(initialPos) && isint(initialPos)
-            obj.pos=initialPos;
-        elseif ~isempty(obj.str) &&  exist('initialPose','var') && ~isempty(initialPos) && ~isint(initialPos)
+        if ~isempty(obj.str) &&  exist('initialPos','var') && ~isempty(initialPos) && Num.isInt(initialPos)
+            ;
+        elseif ~isempty(obj.str) &&  exist('initialPose','var') && ~isempty(initialPos) && ~Num.isInt(initialPos)
             error('Invalid initial position specified');
         elseif ~isempty(obj.str)
-            obj.pos=length(obj.str);
+            initialPos=length(obj.str);
         end
+        if nargin < 4 || isempty(width)
+            width=inf;
+        end
+        obj.width=width;
+        obj.change_pos(initialPos,true);
+        if nargin < 5 || isempty(preTxt)
+            preTxt='';
+        end
+        obj.preTxt=preTxt;
+        if nargin < 6 || isempty(postTxt)
+            postTxt='';
+        end
+        obj.postTxt=postTxt;
+        %obj.posBox=obj.pos;
+        %if obj.posBox > obj.width+1
+        %    obj.posBox=obj.width+1;
+        %end
+        obj.strBoxed;
 
+
+        obj.keystrmethods=methods(obj);
     end
     function [cmd,bSuccess,flag,bDiff]=read(obj,command)
+        command(cellfun(@isempty,command))=[];
         obj.flag=0;
         bSuccess=true;
         if length(command) > 1
@@ -70,7 +102,7 @@ methods
         else
             val={};
         end
-        if ismethod('KeyStr',command{1})
+        if ismember_cell(command{1},obj.keystrmethods)
             lastStr=obj.str;
             lastPos=obj.pos;
             obj.(command{1})(val{:});
@@ -109,7 +141,10 @@ methods
     function obj=down_case(obj,~)
         obj.str = Str.Alph.Lower(obj.str);
     end
-    function obj=change_pos(obj,newpos)
+    function str=change_pos(obj,newpos,bInit)
+        if nargin < 3 || isempty(bInit)
+            bInit=false;
+        end
         if isnan(newpos)
             newpos=length(obj.str);
         end
@@ -119,7 +154,71 @@ methods
         if newpos < 1
             newpos=1;
         end
+        d=newpos-obj.pos;
         obj.pos=newpos;
+
+        if ((d==0 && ~bInit) || isinf(obj.width))
+            if isinf(obj.width)
+                obj.posBox=obj.pos;
+                obj.boxShift=0;
+                obj.lastBoxPos=obj.pos;
+            end
+            if nargout > 0
+                str=obj.strBoxed;
+            end
+            return
+        end
+
+        obj.lastBoxPos=obj.posBox;
+        obj.posBox=d+obj.posBox;
+        if obj.posBox > obj.width+1
+            obj.posBox=obj.width+1;
+        elseif obj.posBox < 1
+            obj.posBox=1;
+        end
+        db=obj.posBox-obj.lastBoxPos;
+        obj.boxShift=obj.boxShift+d-db;
+        if obj.boxShift < 0
+            obj.boxShift=0;
+        end
+        if nargout > 0
+            str=obj.strBoxed;
+        end
+    end
+    function out=get.strBoxed(obj)
+        c=' ';
+        if isinf(obj.width)
+            out=obj.str;
+            return
+        elseif isempty(obj.str)
+            out=repmat(c,1,obj.width);
+            return
+        end
+        s=obj.boxShift+1;
+        d=length(obj.str)-obj.width;
+        if d < 0
+            %try
+                out=obj.str(s:end);
+            %catch ME
+                %disp('-----')
+                %obj.lastBoxPos
+                %obj.posBox
+                %obj.boxShift
+                %length(obj.str)
+                %s
+                %rethrow(ME)
+            %end
+        else
+            e=s+obj.width-1;
+            if e > length(obj.str)
+                e=length(obj.str);
+            end
+            out=obj.str(s:e);
+        end
+        d=length(out) - obj.width;
+        if d < 0
+            out=[out repmat(c,1,abs(d))];
+        end
     end
 %%
     function obj=change_char(obj,newChar)
@@ -144,7 +243,7 @@ methods
         e=obj.str(obj.pos:end);
         obj.str=[s newChar e];
         if ~isempty(newChar)
-            obj.pos=obj.pos+1;
+            obj.inc_pos_right(1);
         end
     end
     function obj=insert_forward_char(obj,newChar)
@@ -156,8 +255,8 @@ methods
         end
         obj.str=[s newChar e];
     end
-    function obj=append_char(obj,newChar)
-        obj.str=[obj.str newChar];
+    function append_char(obj,newChar)
+        obj.str=[obj.str char(newChar)];
     end
     function obj=backspace_char(obj,n)
         if ~exist('n','var') || isempty(n)
@@ -203,16 +302,51 @@ methods
         obj.pos=1;
         obj.flag=-1;
     end
-    function out=return_str(obj)
-        obj.OUT=obj.str;
+    function [out,pos]=get_str(obj,bBox,bCurs)
+        if nargin < 2 || isempty(bBox)
+            bBox=false;
+        end
+        if nargin < 3 || isempty(bCurs)
+            bCurs=false;
+        end
+        if ~bBox
+            out=obj.str;
+            pos=obj.pos;
+        else
+            out=obj.strBoxed;
+            pos=obj.posBox;
+        end
+        if bCurs
+            if isempty(out)
+                out='|';
+            elseif pos==1
+                out=['|' out];
+            elseif pos==length(out)+1
+                out=[out '|'];
+            else
+                out=[out(1:pos-1) '|' out(pos:end)];
+            end
+        end
+        out=[obj.preTxt out obj.postTxt];
+    end
+    function [out,outBox,outCursBox]=return_str(obj)
+        out=obj.get_str();
+        obj.OUT=out;
+        if nargout >= 2
+            outBox=obj.get_str(true,false);
+        end
+        if nargout >=3
+            outCursBox=obj.get_str(true,true);
+        end
         obj.append_history();
         obj.str=[];
+        obj.strBoxed=[];
         obj.pos=1;
+        obj.posBox=1;
+        obj.boxShift=0;
+
         obj.histpos=obj.histpos+1;
         obj.flag=1;
-        if nargout > 0
-            out=obj.OUT;
-        end
     end
     function append_history(obj)
         obj.history.(obj.strMode)=[obj.str; obj.history.(obj.strMode)];
@@ -268,6 +402,24 @@ methods
             obj.change_pos(obj.pos);
         end
     end
+    function reset_str(obj,str,width)
+        obj.initialStr=str;
+        obj.str=str;
+        if nargin < 3 || isempty(width)
+            obj.width=inf;
+        else
+            obj.width=width;
+        end
+
+        pos=obj.pos;
+        if pos > length(str)
+            pos=length(str);
+        end
+        obj.boxShift=0;
+        obj.posBox=1;
+        obj.pos=1;
+        obj.change_pos(pos);
+    end
 %%
     function obj=append_count(obj,count)
         if isnumeric(obj.count)
@@ -292,8 +444,59 @@ methods(Static,Hidden)
             'initialStr' ,'','ischar';...
             'initialPos' ,1,'Num.isInt';...
             'initialStrMode' ,'str','ischar';...
-            'initialMode','n','ischar';...
           };
+    end
+    function out=test()
+        out='';
+
+        obj=KeyStr('str','1234567890ABCEDFGHIJKL',1,5,'preTxt: ',' postTxt');
+        strreal=obj.get_str();
+        str=obj.get_str(true,true);
+        fprintf('\n\n');
+        fprintf(str);
+        nBS=length(str)+1;
+        while true
+            waitforbuttonpress;
+            KEY = double(get(gcf,'CurrentCharacter'));
+            num=num2str(KEY);
+            if isempty(KEY)
+                continue
+            end
+            for i=1:length(KEY)
+                key=KEY(i);
+                switch key
+                    case 8  % BS
+                        obj.backspace_char();
+                    case 13 % \n
+                        out=obj.return_str;
+                    case 27 % esc
+                        if isempty(strreal)
+                            return
+                        else
+                            obj.cancel_str;
+                        end
+                    case 28 %left
+                        obj.inc_pos_left();
+                    case 29 %right
+                        obj.inc_pos_right();
+                    case 30 %up
+                        obj.up_history();
+                    case 31 %down
+                        obj.down_history();
+                    case 127 %Del
+                        obj.delete_char();
+                    otherwise
+                        if key >= 32 && key < 127
+                            obj.insert_char(key);
+                        end
+                end
+            end
+            strreal=obj.get_str();
+            str=obj.get_str(true,true);
+            fprintf([repmat(8,1,nBS) num newline str]);
+            nBS=length(str)+length(num)+1;
+        end
+
     end
 end
 end

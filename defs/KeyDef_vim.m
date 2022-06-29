@@ -1,28 +1,6 @@
 classdef KeyDef_vim < handle & KeyDef
-properties
-    i=containers.Map % insert
-    c=containers.Map % command
-
-    n=containers.Map % normal
-    g=containers.Map % go
-    v=containers.Map % visual
-    k=containers.Map % num go
-end
 properties(Constant)
-    stdModes={'n','i','g','k','v','c'};
-end
-methods
-    function obj =KeyDef_vim();
-        obj.name='vim';
-        obj.defMode='n';
-        obj.mode='n';
-
-
-        E=KeyDef_vim.getEx();
-        [D,T]=KeyDef_vim.get();
-        modes=KeyDef_vim.modes;
-        obj.init(E,D,modes,T);
-    end
+    DEFMODE='l'
 end
 methods(Static)
     function E=getEx()

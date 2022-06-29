@@ -13,10 +13,14 @@ properties
     ScanGrabber
     KeyConverter
     KeyStr
+    KEYSTR=struct
+    aKeyStr
     KeyDef
 
-    lastMode
+    lastMode=cell(0,1);
     lastDef
+    bKeyChange=false
+    bListen=true
 end
 properties(Hidden=true)
     scanBinds
@@ -31,12 +35,48 @@ methods
         end
         obj.KeyDef=KeyDef.change([],Opts.keyDefName,Opts.initialMode);
         obj.KeyStr=KeyStr(Opts.initialStrMode,Opts.initialStr,Opts.initialPos);
+        obj.KEYSTR.(Opts.initialKeyStr)=obj.KeyStr;
+        obj.aKeyStr=Opts.initialKeyStr;
         obj.ScanGrabber= ScanGrabber('nKeys',Opts.nKeys,...
                                      'holdCrit',Opts.holdCrit, ...
                                      'repCrit',Opts.repCrit, ...
                                      'blackListInd',Opts.blackListInd, ...
                                      'repWhiteListInd',Opts.repWhiteListInd ...
                                     );
+    end
+    function append_keyStr(obj,name,KS,bChange)
+        if nargin < 4 || isempty(bChange)
+            bChange=false;
+        end
+        obj.KEYSTR.(name)=KS;
+        if bChange
+            obj.changeKeyStr(name);
+        end
+    end
+    function append_newKeyStr(obj,name,initMode,initStr,initPos)
+        if nargin < 3 || isempty(initMode)
+            initMode='str';
+        end
+        if nargin < 4
+            initStr=[];
+        end
+        if nargin < 5 || isempty(initPos)
+            initPos=1;
+        end
+        obj.KEYSTR.(name)=KeyStr(initMode,initStr,initPos);
+    end
+    function changeKeyStr(obj,name)
+        if isa(name,'KeyStr')
+            obj.KEYSTR.ANON=name;
+            obj.KeyStr=name;
+            obj.aKeyStr='ANON';
+        else
+            if ~isfield(obj.KEYSTR,name)
+                error('KeyStr does not exist')
+            end
+            obj.KeyStr=obj.KEYSTR.(name);
+            obj.aKeyStr=name;
+        end
     end
     function Opts=parse(obj,varargin)
         if numel(varargin) == 1 && (isstruct(varargin{1}) || isa(varargin{1},'dict'))
@@ -61,10 +101,22 @@ methods
             obj.change_def([],obj.KeyDef.defMode);
         case 'mode'
             obj.change_def([],cmd{2});
+            obj.bKeyChange=true;
         case 'def'
             obj.change_def(cmd{2});
+            obj.bKeyChange=true;
         case 'any'
             obj.any();
+        case 'on'  % ptb
+            obj.bListen=true;
+        case 'off' % no ptb, except to turn on
+            obj.bListen=off;
+        case 'toggle'
+            if obj.bListen
+                obj.bListen=false;
+            else
+                obj.bListen=true;
+            end
         otherwise
             obj.status='';
         end
@@ -73,18 +125,15 @@ methods
         % LEAVE EMPTY
     end
     function exitflag=read(obj)
+        obj.bKeyChange=false;
         if obj.bPTB
             [exitflag,scanBinds,keyTime]=obj.ScanGrabber.read(); %KeyPressed
             if exitflag
                 return
             end
-            %if isempty(obj.scanBinds)
-            %    obj.keyTime=keyTime;
-            %    obj.scanInds=find(scanBinds);
-            %else
-                obj.keyTime(end+1,1)=keyTime;
-                obj.scanBinds=[obj.scanBinds; scanBinds];
-            %end
+            % APPEND UNTIL NEXT READ
+            obj.keyTime(end+1,1)=keyTime;
+            obj.scanBinds=[obj.scanBinds; scanBinds];
         else
             exitflag=false;
             waitforbuttonpress;
@@ -98,25 +147,6 @@ methods
         key=cell(n,1);
         msg={};
         [exitflag,literal,key]=obj.KeyConverter.read(scanInds);
-        %for i = 1:n
-            %[exitflag,literal,key]=obj.KeyConverter.read(scanInds);
-            %try
-            %    [exitflag(i,1),literal{i,1},key{i,1}]=obj.KeyConverter.read(scanInds(i));
-            %catch ME
-            %    if strcmp(ME.identifier,'MATLAB:Containers:Map:NoKey')
-            %        exitflag(i)=true;
-            %        msg{end+1,1}=['Keycode not defined for scancode ' num2str(scanInds(i))];
-            %    else
-            %        rethrow(ME);
-            %    end
-            %end
-        %end
-        %literal(exitflag)=[];
-        %key(exitflag)=[];
-        %exitflag=all(exitflag) || isempty(literal);
-        %if exitflag
-        %    return
-        %end
     end
     function [literal,exitflag,msg]=convertBind(obj,scanBinds)
         m=size(scanBinds,1);
@@ -178,7 +208,7 @@ methods
         name(rmind)=[];
 
 
-        if isempty(cmd)
+        if isempty(cmd) || all(cellfun(@isempty,cmd))
             exitflag=true;
             return
         end
@@ -210,7 +240,9 @@ methods
         if ~iscell(cmd{1})
             [cmd,status]=obj.parse_cmd(cmd);
             bTrans=[bTrans{:}];
-            cmd=[cmd{:}];
+            if iscell(cmd)
+                cmd=[cmd{:}];
+            end
             name=[name{:}];
             estatus=2;
             return
@@ -241,22 +273,29 @@ methods
         status=vertcat(status{:});
 
     end
-    function [str,pos,mode,flag, bDiff]=getString(obj)
-        str=obj.KeyStr.str;
-        pos=obj.KeyStr.pos;
-        mode=obj.KeyStr.strMode;
-        flag=obj.KeyStr.flag;
-        bDiff=obj.KeyStr.bDiff;
-        obj.KeyStr.bDiff=false;
+    function [str,pos,mode,flag, bDiff]=getString(obj,name)
+        if nargin < 2 || isempty(name)
+            name=obj.aKeyStr;
+        end
+        KS=obj.KEYSTR.(name);
+        str=KS.str;
+        pos=KS.pos;
+        mode=KS.strMode;
+        flag=KS.flag;
+        bDiff=KS.bDiff;
+        obj.KEYSTR.(name).bDiff=false;
+    end
+    function OUT=returnString(obj,name)
+        if nargin < 2 || isempty(name)
+            name=obj.aKeyStr;
+        end
+        OUT=obj.KEYSTR.(name).return_str();
     end
     function moude=getMode(obj)
         mode=obj.KeyDef.mode;
     end
     function histr=getHistory(obj)
         histr=obj.KeyStr.history;
-    end
-    function OUT=returnString(obj)
-        OUT=obj.KeyStr.return_str();
     end
 end
 methods(Access=?PsyShell)
@@ -267,10 +306,40 @@ methods(Access=?PsyShell)
             obj.change_def(newName,[]);
         end
     end
+    function moude=change_to_lastMode(obj)
+        if isempty(obj.lastMode)
+            moude='';
+            return
+        end
+        if iscell(obj.lastMode)
+            moude=obj.lastMode{end,1};
+            obj.lastMode(end)=[];
+        else
+            moude=obj.lastMode;
+            obj.lastMode={};
+        end
+        while ~isempty(obj.lastMode) && strcmp(obj.KeyDef.mode,obj.lastMode{end})
+            moude=obj.lastMode{end,1};
+            obj.lastMode(end)=[];
+        end
+        obj.KeyDef=KeyDef.change(obj.KeyDef, [], moude);
+    end
     function change_def(obj,newName,newMode)
-        obj.lastMode=obj.KeyDef.mode;
-        obj.lastDef=obj.KeyDef.name;
-        obj.KeyDef=KeyDef.change(obj.KeyDef, newName, newMode);
+        bSuccess=true;
+        if strcmp(obj.KeyDef.mode,newMode)
+            bSuccess=false;
+        elseif strcmp(obj.KeyDef.mode,obj.KeyDef.defMode)
+            obj.lastMode=cell(0,1);
+        elseif ~ismember(obj.KeyDef.mode,obj.KeyDef.transients)
+            obj.lastMode{end+1,1}=obj.KeyDef.mode;
+        end
+        if ~strcmp(newName,obj.KeyDef.name)
+            obj.lastDef=obj.KeyDef.name;
+            bSuccess=true;
+        end
+        if bSuccess
+            obj.KeyDef=KeyDef.change(obj.KeyDef, newName, newMode);
+        end
     end
 end
 methods(Access=private)
@@ -283,6 +352,13 @@ methods(Access=private)
         % flag, -2 clear, -1=cancel, 1=return, 0 nothing
         cmd=[cmd repmat({''},1,4-length(cmd))];
         OUT=cmd;
+        if obj.bListen==0
+            if ~(strcmp(cmd{1},'key') && ismember(cmd{2},{'on','toggle'}))
+                OUT=[];
+                status='0';
+                return
+            end
+        end
         switch cmd{1}
             case 'str'
                 [~,bSuccess]=obj.KeyStr.read(cmd(2:end));
@@ -330,7 +406,8 @@ methods(Static,Hidden)
         PStr=KeyStr.getP();
         P={ ...
             'keyDefName'  ,'basic','ischar_e';... % KEY DEF
-            'initialMode','n','ischar';...            % KEY DEF
+            'initialMode','','ischar';...            % KEY DEF
+            'initialKeyStr','SHELL','ischar_e'; ...
             'bConvert',true,'isBinary';...
             'modList',[],'iscell_e';...
         };

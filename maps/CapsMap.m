@@ -55,7 +55,7 @@ methods
 
         obj.map=containers.Map(d(:,1),d(:,2));
     end
-    function caps=fromKeyCode(keycode)
+    function caps=fromKeyCode(obj,keycode)
         if ~iscell(keycode)
             caps=obj.convertFun(keycode);
             return
@@ -64,7 +64,7 @@ methods
     end
 end
 methods(Access=private)
-    function out=convertFun(x)
+    function out=convertFun(obj,x)
         try
             out=obj.map(x);
         catch

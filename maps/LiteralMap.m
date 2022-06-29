@@ -16,14 +16,19 @@ methods
             'space', '\s';
             'backspace', '\B';
             'delete', '\d';
-            'altL','\A';
-            'altR','\A';
-            'shiftL','\S';
-            'shiftR','\S';
-            'ctlL','\C';
-            'ctlR','\C';
-            'guiL','\M';
-            'guiR','\M' ...
+            ...
+            'alt','\A';
+            'altL','\AL';
+            'altR','\AR';
+            'shift','\S';
+            'shiftL','\SL';
+            'shiftR','\SR';
+            'ctl','\C';
+            'ctlL','\CL';
+            'ctlR','\CR';
+            'gui','\M';
+            'guiL','\ML';
+            'guiR','\MR' ...
           };
         obj.map=containers.Map(d(:,1),d(:,2));
     end

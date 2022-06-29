@@ -1,4 +1,6 @@
 classdef KeyConverter < handle
+% SCAN TO KEY
+% KEY TO LITERAL (CAPS AND MODIFIERS)
 properties
     keyCodes
     literal
@@ -6,18 +8,26 @@ properties
     LiteralCoder=LiteralMap
     CapsCoder=CapsMap
     KeyCoder
+    bCaps
 
     modList
-    modFlags
 end
 properties(Hidden)
     IndFlds
 end
 methods
 
-    function obj=KeyConverter(modList,keyCoderName,bPTB)
-        if nargin < 1
-            obj.modList=KeyConverter.getDefaultModList();
+    function obj=KeyConverter(modList,keyCoderName,bPTB,bCaps)
+        if nargin < 4
+            bCaps=true;
+        end
+        obj.bCaps=bCaps;
+
+        if nargin < 1 || isempty(modList)
+            obj.modList=obj.getDefaultModList();
+            if ~obj.bCaps
+                obj.modList=[obj.getShiftModList; obj.modList];
+            end
         else
             obj.modList=modList;
         end
@@ -33,34 +43,32 @@ methods
             obj.keycode=[];
             return
         end
-
-        % MODIFIER KEYS
-        obj.literal=obj.LiteralCoder.fromKeyCode(obj.keyCodes);
-        if obj.getFlags('shift');
-            obj.literal=obj.CapsMap(obj.literal);
-            obj.rm_literal('\S');
-        end
-        app={};
-        if obj.getFlags('ctl')
-            obj.rm_literal('\C');
-            app{end+1}='\C';
-        end
-        if obj.getFlags('alt')
-            obj.rm_literal('\A');
-            app{end+1}='\A';
-        end
-        if obj.getFlags('gui')
-            obj.rm_literal('\M');
-            app{end+1}='\M';
-        end
-
+        obj.modify();
         outKeyCodes=obj.keyCodes;
         outLiteral=obj.literal;
-
         exitflag=0;
+    end
+    function modify(obj)
+        % MODIFIER KEYS
+        obj.literal=obj.LiteralCoder.fromKeyCode(obj.keyCodes);
+        if obj.bCaps
+            obj.capsConvert();
+        end
+        for i = 1:size(obj.modList,1)
+            obj.modConvert(i);
+        end
     end
     function scan=keyCodeToScanCode(obj,keyCode);
         scan=obj.KeyCoder.toScan(keyCode);
+    end
+end
+methods(Hidden,Static)
+    function K=test()
+        obj=KeyConverter([],'PtbMap',true);
+        ScanInd=[39 48 106 93]; %a ; /CR /AR
+        obj.read(ScanInd);
+        obj.keyCodes
+        obj.literal
     end
 end
 methods(Access=private)
@@ -70,25 +78,38 @@ methods(Access=private)
     function add_literal(obj,name)
         obj.literal=[name; obj.literal]
     end
-    function out=getFlags(obj,name)
-        %if isempty(obj.modList)
-        %    obj.modFlags=any(ismember(obj.modList,obj.KeyCodes),2);
-        %end
-
-        if isempty(obj.modList) || ~ismember(name,obj.modList(:,1))
-            out=false;
-            return
+    function out=capsConvert(obj)
+        flags=obj.getShiftModList();
+        out=obj.flag_fun(flags);
+        if out
+            obj.literal=obj.CapsCoder.fromKeyCode(obj.literal);
         end
-        out=obj.modFlags(ismember(obj.modList(:,1),name));
+    end
+    function out=modConvert(obj,ind)
+        flags=obj.modList(ind,2:end);
+        out=obj.flag_fun(flags);
+        if out
+            ind=~ismember(obj.literal,obj.modList);
+            obj.literal(ind)=strcat(flags{1},'-',obj.literal(ind));
+        end
+    end
+    function out=flag_fun(obj,flags)
+        ind=ismember(obj.literal,flags);
+        out=any(ind);
+        if out
+            obj.literal(ind)=[];
+        end
     end
 end
 methods(Static,Hidden)
+    function E=getShiftModList()
+        E={'shift','\S', '\SL','\SR'};
+    end
     function E=getDefaultModList()
         E={ ...
-            'shift', 'shiftL','shiftR';
-            'ctl','ctlL','ctlR';
-            'alt','altL','altR';
-            'gui','guiL','guiR';
+            'ctl','\C','\CL','\CR';
+            'alt','\A','\AL','\AR';
+            'gui','\M','\ML','\MR';
         };
     end
 end
